@@ -3,16 +3,17 @@
 
 module Main where
 
-import Control.Monad.IO.Class
-import Database.Redis
-import Data.Char (ord)
-import Data.Maybe (maybe, fromMaybe, fromJust)
-import Test.QuickCheck
-import Test.QuickCheck.Monadic
-import qualified Data.ByteString as BS
-import Test.QuickCheck.Instances ()
-import GHC.Word
-import Data.ByteString.UTF8 as BSU
+import           Control.Monad.IO.Class
+import           Database.Redis
+import qualified Data.ByteString           as BS
+import qualified Data.ByteString.UTF8      as BSU
+import           Data.Char                 (ord)
+import           Data.Maybe                (maybe, fromMaybe, fromJust)
+import           Data.Either               (fromRight)
+import           GHC.Word
+import           Test.QuickCheck
+import           Test.QuickCheck.Monadic
+import           Test.QuickCheck.Instances ()
 
 
 -- https://stackoverflow.com/questions/2259926/testing-io-actions-with-monadic-quickcheck
@@ -35,7 +36,7 @@ extract x = case x of
   Left _  -> Nothing
   Right y -> maybe Nothing Just y
 
-extract' :: Either Reply ([Maybe BS.ByteString]) -> Maybe [BS.ByteString]
+extract' :: Either Reply [Maybe BS.ByteString] -> Maybe [BS.ByteString]
 extract' x = case x of
   Left _   -> Nothing
   Right ys -> Just $ filter (/= "") $ fmap (fromMaybe "") ys
@@ -113,14 +114,41 @@ prop_existsThenDelete conn = monadicIO $ do
   where
     getBool = fromJust . extractBool
 
+-- rpushThenRpushx
+prop_rpushThenRpushx :: Connection -> Property
+prop_rpushThenRpushx conn = monadicIO $ do
+  x  <- pick $ elements [1..100 :: Integer]
+  xs <- pick $ listOf1 (vector 2 :: Gen [Integer])
+  run $ runRedis conn $ do
+    let key = "mylist"
+    rpush key [toBs x]
+    mapM_ (rpushx key . toBs) (concat xs)
+    list <- lrange key 0 (-1)
+    del [key]
+    let list' = map fromBs $ fromRight [] list
+    return $ list' == x : concat xs
+  where
+    toBs = BSU.fromString . show
+    fromBs = read . BSU.toString
+
 -- --------------------------------------------------------------------------------
 -- Main
 
 main :: IO ()
 main = do
   conn <- checkedConnect defaultConnectInfo
+  renderHeader "prop_setThenGet: "
   quickCheck $ prop_setThenGet       conn
+  renderHeader "prop_counterIncrBy: "
   quickCheck $ prop_counterIncrBy    conn
+  renderHeader "prop_msetThenMget: "
   quickCheck $ prop_msetThenMget     conn
+  renderHeader "prop_existsThenDelete: "
   quickCheck $ prop_existsThenDelete conn
+  renderHeader "prop_rpushThenRpushx: "
+  quickCheck $ prop_rpushThenRpushx  conn
   return ()
+  where
+    renderHeader str = putStr $  str ++ replicate (25 - length str) ' '
+
+
