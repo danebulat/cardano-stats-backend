@@ -6,7 +6,7 @@ module Main where
 import Control.Monad.IO.Class
 import Database.Redis
 import Data.Char (ord)
-import Data.Maybe (maybe, fromMaybe)
+import Data.Maybe (maybe, fromMaybe, fromJust)
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
 import qualified Data.ByteString as BS
@@ -30,7 +30,7 @@ genReadableByteString = do
 -- --------------------------------------------------------------------------------
 -- Utils
 
-extract :: Either Reply (Maybe BS.ByteString) -> Maybe BS.ByteString
+extract :: Either Reply (Maybe a) -> Maybe a
 extract x = case x of
   Left _  -> Nothing
   Right y -> maybe Nothing Just y
@@ -39,6 +39,11 @@ extract' :: Either Reply ([Maybe BS.ByteString]) -> Maybe [BS.ByteString]
 extract' x = case x of
   Left _   -> Nothing
   Right ys -> Just $ filter (/= "") $ fmap (fromMaybe "") ys
+
+extractBool :: Either Reply Bool -> Maybe Bool
+extractBool x = case x of
+  Left _  -> Nothing
+  Right b -> Just b
 
 -- --------------------------------------------------------------------------------
 -- Redis tests 
@@ -94,13 +99,28 @@ prop_msetThenMget conn = monadicIO $ do
     toBs   = BSU.fromString . show
     fromBs = BSU.toString
 
+-- existThenDelete
+prop_existsThenDelete :: Connection -> Property
+prop_existsThenDelete conn = monadicIO $ do
+  bs <- pick genReadableByteString
+  run $ runRedis conn $ do
+    let key = "mykey"
+    set key bs
+    exists1 <- exists key
+    del [key]
+    exists2 <- exists key
+    return $ getBool exists1 && not (getBool exists2)
+  where
+    getBool = fromJust . extractBool
+
 -- --------------------------------------------------------------------------------
 -- Main
 
 main :: IO ()
 main = do
   conn <- checkedConnect defaultConnectInfo
-  quickCheck $ prop_setThenGet    conn
-  quickCheck $ prop_counterIncrBy conn
-  quickCheck $ prop_msetThenMget  conn
+  quickCheck $ prop_setThenGet       conn
+  quickCheck $ prop_counterIncrBy    conn
+  quickCheck $ prop_msetThenMget     conn
+  quickCheck $ prop_existsThenDelete conn
   return ()
