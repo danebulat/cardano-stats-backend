@@ -35,6 +35,11 @@ extract x = case x of
   Left _  -> Nothing
   Right y -> maybe Nothing Just y
 
+extract' :: Either Reply ([Maybe BS.ByteString]) -> Maybe [BS.ByteString]
+extract' x = case x of
+  Left _   -> Nothing
+  Right ys -> Just $ filter (/= "") $ fmap (fromMaybe "") ys
+
 -- --------------------------------------------------------------------------------
 -- Redis tests 
 
@@ -67,9 +72,27 @@ prop_counterIncrBy conn = monadicIO $ do
     let k = "key"
     set k (BSU.fromString . show $ x) >> incrby k y
     bs <- get k
+    flushdb
     let r  = fromMaybe "0" $ extract bs
     let r' = read (BSU.toString r) :: Integer
     return $ r' == x + y
+
+-- msetThenMget
+prop_msetThenMget :: Connection -> Property
+prop_msetThenMget conn = monadicIO $ do
+  integers <- pick $ concat <$> listOf1 (vector 2 :: Gen [Integer])
+  run $ runRedis conn $ do
+    -- convert integers to key and value bytestrings for redis
+    let xs = map (\x -> (toBs x, toBs x)) integers
+    mset xs
+    ys <- mget $ map toBs integers
+    flushdb
+    -- convert the retrieved bytestrings into a list of integers
+    let ys' = maybe [] (map $ read . fromBs) (extract' ys)
+    return $ ys' == integers
+  where
+    toBs   = BSU.fromString . show
+    fromBs = BSU.toString
 
 -- --------------------------------------------------------------------------------
 -- Main
@@ -79,4 +102,5 @@ main = do
   conn <- checkedConnect defaultConnectInfo
   quickCheck $ prop_setThenGet    conn
   quickCheck $ prop_counterIncrBy conn
+  quickCheck $ prop_msetThenMget  conn
   return ()
