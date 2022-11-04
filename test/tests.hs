@@ -12,7 +12,8 @@ import Test.QuickCheck.Monadic
 import qualified Data.ByteString as BS
 import Test.QuickCheck.Instances ()
 import GHC.Word
-import Data.ByteString.Builder (word8)
+import Data.ByteString.UTF8 as BSU
+
 
 -- https://stackoverflow.com/questions/2259926/testing-io-actions-with-monadic-quickcheck
 
@@ -37,16 +38,16 @@ extract x = case x of
 -- --------------------------------------------------------------------------------
 -- Redis tests 
 
-prop_test1 :: Connection -> Property
-prop_test1 conn = monadicIO $ do
+-- setThenGet 
+prop_setThenGet :: Connection -> Property
+prop_setThenGet conn = monadicIO $ do
   -- Set up random data 
   bs1 <- pick genReadableByteString
   bs2 <- pick genReadableByteString
-  res <- run $ run_test1 conn [bs1, bs2]
-  return res
+  run $ runSetThenGet conn [bs1, bs2]
 
-run_test1 :: Connection -> [BS.ByteString] -> IO Bool
-run_test1 conn xs = do
+runSetThenGet :: Connection -> [BS.ByteString] -> IO Bool
+runSetThenGet conn xs = do
   runRedis conn $ do
     set "hello" (head xs)
     set "world" (last xs)
@@ -57,11 +58,25 @@ run_test1 conn xs = do
     let r2 = fromMaybe "" $ extract world
     return $ r1 == head xs && r2 == last xs
 
+-- counterIncrBy
+prop_counterIncrBy :: Connection -> Property
+prop_counterIncrBy conn = monadicIO $ do
+  x <- pick $ elements [1..100 :: Integer]
+  y <- pick $ elements [1..100 :: Integer]
+  run $ runRedis conn $ do
+    let k = "key"
+    set k (BSU.fromString . show $ x) >> incrby k y
+    bs <- get k
+    let r  = fromMaybe "0" $ extract bs
+    let r' = read (BSU.toString r) :: Integer
+    return $ r' == x + y
+
 -- --------------------------------------------------------------------------------
 -- Main
 
 main :: IO ()
 main = do
   conn <- checkedConnect defaultConnectInfo
-  quickCheck $ prop_test1 conn
+  quickCheck $ prop_setThenGet    conn
+  quickCheck $ prop_counterIncrBy conn
   return ()
