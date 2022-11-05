@@ -151,4 +151,3 @@ main = do
   where
     renderHeader str = putStr $  str ++ replicate (25 - length str) ' '
 
-
