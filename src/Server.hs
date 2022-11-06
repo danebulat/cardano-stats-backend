@@ -59,15 +59,14 @@ instance ToJSON ReqUrlWithId
 -- --------------------------------------------------------------------------------
 -- Handlers
 
-(+++) = BS.append
-infixr 5 +++
-
 server :: Server ReqApi
 server = requests
     :<|> postRequest
     :<|> deleteRequest
 
+-- --------------------------------------------------------------------------------
 -- GET /requests
+
 requests :: Handler [ReqUrlWithId]
 requests = do
   liftIO $ putStrLn "> getting request data"
@@ -85,13 +84,16 @@ postRequest req = do
     let key = "reqarr"
     wrappedMembers <- smembers key
 
-    -- set up data
+    -- get a unique id
     let members  = fromRight [] wrappedMembers
-        nextId   = toBs $ length members + 1
+    nextIdInt <- getUniqueId $ length members + 1
+
+    -- set up data
+    let nextId   = toBs nextIdInt
         hashKey  = key +++ ":" +++ nextId
         hashData = [ ("id", nextId), ("reqUrl", toBs . getReqUrl $ req) ]
 
-    -- save hash and add to set
+    -- save hash and add hash to set
     hmset hashKey hashData
     sadd key [hashKey]
     return ()
@@ -99,10 +101,39 @@ postRequest req = do
   liftIO $ putStrLn $ "> POST successful (" ++ show req ++ ")"
   return NoContent
 
--- DELETE /requests/requestId
+-- calculate a unique id
+getUniqueId :: Int -> Redis Int
+getUniqueId id = do
+  let key = "reqarr"
+      hkey = key +++ ":" +++ toBs id
+  wrappedBool <- sismember key hkey
+  if fromRight False wrappedBool
+    then getUniqueId (id + 1)
+    else return id
+
+-- --------------------------------------------------------------------------------
+-- DELETE /requests/:requestId
+
 deleteRequest :: Int -> Handler NoContent
 deleteRequest reqId = do
-  liftIO $ putStrLn $ "> performing DELETE with id " ++ show reqId
+  conn <- liftIO $ checkedConnect defaultConnectInfo
+  
+  liftIO $ runRedis conn $ do
+    let key    = "reqarr"
+        remKey = key +++ ":" +++ toBs reqId
+
+    -- confirm remKey is a member of the set
+    wrappedBool <- sismember key remKey
+    let isMember = fromRight False wrappedBool
+    if not isMember then return ()
+    else do
+      -- TODO: Check wrappedNumRemoved
+      wrappedNumRemoved <- srem key [remKey]
+      -- remove hash from db
+      del [remKey]
+      return ()
+
+  liftIO $ putStrLn $ "> DELETE successful (ID " ++ show reqId ++ ")"
   return NoContent
 
 -- --------------------------------------------------------------------------------
@@ -133,6 +164,9 @@ main = run 8081 app
 
 -- --------------------------------------------------------------------------------
 -- Utils
+
+(+++) = BS.append
+infixr 5 +++
 
 toBs :: Show a => a -> BS.ByteString
 toBs = BSU.fromString . show
