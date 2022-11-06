@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use bimap" #-}
 
 module Main where
 
@@ -131,23 +133,58 @@ prop_rpushThenRpushx conn = monadicIO $ do
     toBs = BSU.fromString . show
     fromBs = read . BSU.toString
 
+-- hmsetThenHmget
+prop_hmsetThenHmget :: Connection -> Property
+prop_hmsetThenHmget conn = monadicIO $ do
+  key      <- pick genReadableByteString
+  integers <- pick $ concat <$> listOf1 (vector 1 :: Gen [Integer])
+  
+  -- convert integers to a [(ByteString, ByteString)] with unique fields
+  let fieldValues = strToBsTup $ addSuffix 1 $ map (\x -> (show x, show x)) integers
+  let fields      = map fst fieldValues
+  let values      = map snd fieldValues
+  
+  -- start redis environment
+  run $ runRedis conn $ do
+    hmset key fieldValues
+    emBs <- hmget key fields
+    let bs = fromMaybe [] (extract' emBs)
+    return $ bs == values
+  where
+    strToBsTup :: [(String, String)] -> [(BS.ByteString, BS.ByteString)]
+    strToBsTup xs = map (\(f, v) ->
+      (BSU.fromString f, BSU.fromString v)) xs
+
+-- helper function, run addSuffixSample to see function
+addSuffix :: Int -> [(String, String)] -> [(String, String)]
+addSuffix _ [] = []
+addSuffix n ((f, v): xs) = (go f n, v) : addSuffix (n+1) xs
+  where
+    go f n = f ++ ":" ++ show n  
+
+addSuffixSample :: [(String, String)]
+addSuffixSample = addSuffix 1 sampleData
+  where sampleData = [("field", "val"), ("field", "val"), ("field", "val")]
+
 -- --------------------------------------------------------------------------------
 -- Main
 
 main :: IO ()
 main = do
   conn <- checkedConnect defaultConnectInfo
-  renderHeader "prop_setThenGet: "
+  renderHeader "prop_setThenGet:"
   quickCheck $ prop_setThenGet       conn
-  renderHeader "prop_counterIncrBy: "
+  renderHeader "prop_counterIncrBy:"
   quickCheck $ prop_counterIncrBy    conn
-  renderHeader "prop_msetThenMget: "
+  renderHeader "prop_msetThenMget:"
   quickCheck $ prop_msetThenMget     conn
-  renderHeader "prop_existsThenDelete: "
+  renderHeader "prop_existsThenDelete:"
   quickCheck $ prop_existsThenDelete conn
-  renderHeader "prop_rpushThenRpushx: "
+  renderHeader "prop_rpushThenRpushx:"
   quickCheck $ prop_rpushThenRpushx  conn
+  renderHeader "prop_hmsetThenHmget:"
+  quickCheck $ prop_hmsetThenHmget   conn
   return ()
   where
-    renderHeader str = putStr $  str ++ replicate (25 - length str) ' '
+    renderHeader str = putStr $  str ++ " " ++ replicate (25 - length str) ' '
 
