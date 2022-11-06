@@ -36,6 +36,7 @@ library
     other-modules:    Server
     build-depends:    base ^>=4.14.3.0
                     , hedis
+                    , utf8-string
                     , aeson
                     , attoparsec
                     , base-compat

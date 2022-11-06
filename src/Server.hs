@@ -8,16 +8,16 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Server where 
+module Server where
 
 import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Aeson
 import Data.Aeson.Types
 import Data.Attoparsec.ByteString
-import qualified Data.ByteString as BS
-import Data.List
-import Data.Maybe
+import qualified Data.ByteString           as BS
+import qualified Data.ByteString.UTF8      as BSU
+import Data.Either (fromRight)
 import Data.String.Conversions
 import Data.Time.Calendar
 import GHC.Generics
@@ -28,6 +28,8 @@ import Servant
 import System.Directory
 import qualified Data.Aeson.Parser
 import Data.Text (Text)
+import Database.Redis
+
 
 -- --------------------------------------------------------------------------------
 -- API type
@@ -42,20 +44,23 @@ type ReqApi = "requests" :>
 -- Data types 
 
 newtype ReqUrl = ReqUrl
-  { getReqUrl :: Text
+  { getReqUrl :: String
   } deriving (Show, Generic)
 
 instance FromJSON ReqUrl
 
 data ReqUrlWithId = ReqUrlWithId
   { id     :: Integer
-  , reqUrl :: Text
+  , reqUrl :: String
   } deriving Generic
 
 instance ToJSON ReqUrlWithId
 
 -- --------------------------------------------------------------------------------
 -- Handlers
+
+(+++) = BS.append
+infixr 5 +++
 
 server :: Server ReqApi
 server = requests
@@ -68,10 +73,30 @@ requests = do
   liftIO $ putStrLn "> getting request data"
   return sample1
 
+-- --------------------------------------------------------------------------------
 -- POST /requests
+
 postRequest :: ReqUrl -> Handler NoContent
 postRequest req = do
-  liftIO $ putStrLn $ "> performing POST for " ++ show req
+  conn <- liftIO $ checkedConnect defaultConnectInfo
+
+  liftIO $ runRedis conn $ do
+    -- get set members
+    let key = "reqarr"
+    wrappedMembers <- smembers key
+
+    -- set up data
+    let members  = fromRight [] wrappedMembers
+        nextId   = toBs $ length members + 1
+        hashKey  = key +++ ":" +++ nextId
+        hashData = [ ("id", nextId), ("reqUrl", toBs . getReqUrl $ req) ]
+
+    -- save hash and add to set
+    hmset hashKey hashData
+    sadd key [hashKey]
+    return ()
+
+  liftIO $ putStrLn $ "> POST successful (" ++ show req ++ ")"
   return NoContent
 
 -- DELETE /requests/requestId
@@ -105,3 +130,9 @@ app = serve apiType server
 
 main :: IO ()
 main = run 8081 app
+
+-- --------------------------------------------------------------------------------
+-- Utils
+
+toBs :: Show a => a -> BS.ByteString
+toBs = BSU.fromString . show
