@@ -17,7 +17,8 @@ import Data.Aeson.Types
 import Data.Attoparsec.ByteString
 import qualified Data.ByteString           as BS
 import qualified Data.ByteString.UTF8      as BSU
-import Data.Either (fromRight)
+import Data.Either                         (fromRight)
+import Data.Maybe                          (fromJust)
 import Data.String.Conversions
 import Data.Time.Calendar
 import GHC.Generics
@@ -69,8 +70,36 @@ server = requests
 
 requests :: Handler [ReqUrlWithId]
 requests = do
-  liftIO $ putStrLn "> getting request data"
-  return sample1
+  conn <- liftIO $ checkedConnect defaultConnectInfo
+
+  redisAction <- liftIO (runRedis conn $ do
+    liftIO $ print "Getting data..."
+    -- get all hash keys
+    let key = "reqarr"
+    wrappedMembers <- smembers key
+    let hashKeys = fromRight [] wrappedMembers
+        fieldId  = "id"
+        fieldUrl = "reqUrl"
+    
+    -- return list of ReqUrlWithId
+    return $ getHashData hashKeys [])
+
+  reqUrls <- liftIO $ runRedis conn redisAction
+  liftIO $ putStrLn $ "> GET successful (" ++ show (length reqUrls) ++ " items fetched)"
+  return reqUrls
+
+getHashData :: [BS.ByteString] -> [ReqUrlWithId] -> Redis [ReqUrlWithId]
+getHashData [] reqs = return reqs
+getHashData (x : xs) reqs = do
+  vals <- hmget x ["id", "reqUrl"]
+  case vals of
+    Left reply -> error "some error occurred..."
+    Right mbs  -> do
+      let unwrapped = map fromJust mbs
+          id        = read $ BSU.toString $ head unwrapped
+          url       = BSU.toString $ last unwrapped
+          reqUrl    = ReqUrlWithId id url
+      getHashData xs (reqUrl : reqs)
 
 -- --------------------------------------------------------------------------------
 -- POST /requests
@@ -117,7 +146,7 @@ getUniqueId id = do
 deleteRequest :: Int -> Handler NoContent
 deleteRequest reqId = do
   conn <- liftIO $ checkedConnect defaultConnectInfo
-  
+
   liftIO $ runRedis conn $ do
     let key    = "reqarr"
         remKey = key +++ ":" +++ toBs reqId
