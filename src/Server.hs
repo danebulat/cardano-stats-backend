@@ -10,27 +10,16 @@
 
 module Server where
 
-import Control.Monad.Except
-import Control.Monad.Reader
-import Data.Aeson
-import Data.Aeson.Types
-import Data.Attoparsec.ByteString
+import           Control.Monad.Except
+import           Data.Aeson
 import qualified Data.ByteString           as BS
 import qualified Data.ByteString.UTF8      as BSU
-import Data.Either                         (fromRight)
-import Data.Maybe                          (fromJust)
-import Data.String.Conversions
-import Data.Time.Calendar
-import GHC.Generics
-import Network.HTTP.Media ((//), (/:))
-import Network.Wai
-import Network.Wai.Handler.Warp
-import Servant
-import System.Directory
-import qualified Data.Aeson.Parser
-import Data.Text (Text)
-import Database.Redis
-
+import           Data.Either               (fromRight)
+import           Data.Maybe                (fromJust)
+import           GHC.Generics
+import           Network.Wai.Handler.Warp
+import           Servant
+import           Database.Redis
 
 -- --------------------------------------------------------------------------------
 -- API type
@@ -73,33 +62,32 @@ requests = do
   conn <- liftIO $ checkedConnect defaultConnectInfo
 
   redisAction <- liftIO (runRedis conn $ do
-    liftIO $ print "Getting data..."
     -- get all hash keys
-    let key = "reqarr"
-    wrappedMembers <- smembers key
+    wrappedMembers <- smembers "reqarr"
     let hashKeys = fromRight [] wrappedMembers
-        fieldId  = "id"
-        fieldUrl = "reqUrl"
-    
     -- return list of ReqUrlWithId
-    return $ getHashData hashKeys [])
+    return $ getHashData hashKeys)
 
   reqUrls <- liftIO $ runRedis conn redisAction
   liftIO $ putStrLn $ "> GET successful (" ++ show (length reqUrls) ++ " items fetched)"
   return reqUrls
 
-getHashData :: [BS.ByteString] -> [ReqUrlWithId] -> Redis [ReqUrlWithId]
-getHashData [] reqs = return reqs
-getHashData (x : xs) reqs = do
-  vals <- hmget x ["id", "reqUrl"]
-  case vals of
-    Left reply -> error "some error occurred..."
-    Right mbs  -> do
-      let unwrapped = map fromJust mbs
-          id        = read $ BSU.toString $ head unwrapped
-          url       = BSU.toString $ last unwrapped
-          reqUrl    = ReqUrlWithId id url
-      getHashData xs (reqUrl : reqs)
+-- takes hash keys and returns ReqUrlWithId objects
+getHashData :: [BS.ByteString] -> Redis [ReqUrlWithId]
+getHashData hashKeys = go hashKeys []
+  where
+    go :: [BS.ByteString] -> [ReqUrlWithId] -> Redis [ReqUrlWithId]
+    go [] reqs = return reqs
+    go (x : xs) reqs = do
+      vals <- hmget x ["id", "reqUrl"]
+      case vals of
+        Left reply -> error "some error occurred..."
+        Right mbs  -> do
+          let unwrapped = map fromJust mbs
+              id        = read $ BSU.toString $ head unwrapped
+              url       = BSU.toString $ last unwrapped
+              reqUrl    = ReqUrlWithId id url
+          go xs (reqUrl : reqs)
 
 -- --------------------------------------------------------------------------------
 -- POST /requests
@@ -120,7 +108,7 @@ postRequest req = do
     -- set up data
     let nextId   = toBs nextIdInt
         hashKey  = key +++ ":" +++ nextId
-        hashData = [ ("id", nextId), ("reqUrl", toBs . getReqUrl $ req) ]
+        hashData = [("id", nextId), ("reqUrl", toBs . getReqUrl $ req)]
 
     -- save hash and add hash to set
     hmset hashKey hashData
