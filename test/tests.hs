@@ -192,6 +192,38 @@ prop_addHashToSet conn = monadicIO $ do
     return result
 
 -- --------------------------------------------------------------------------------
+-- Test summary:
+--  > Create a hash and add it to a new set
+--  > Confirm that the hash is a member of the set
+--  > Remove the hash from the set and delete it
+--  > Confirm that the hash and set have been removed 
+
+prop_delHashFromSet :: Connection -> Property
+prop_delHashFromSet conn = monadicIO $ do
+  hashKey <- pick genReadableByteString
+  setKey  <- pick genReadableByteString
+  let hashFieldVals = [("field1", "val1"), ("field2", "val2")]
+  
+  run $ runRedis conn $ do
+    -- add hash and set 
+    hmset hashKey hashFieldVals
+    sadd setKey [hashKey]
+    -- check hash is member of set
+    wrappedBool <- sismember setKey hashKey
+    let isMember = fromRight False wrappedBool
+    if not isMember then return False
+    else do
+        -- remove hash from set
+        wrappedNumRemoved <- srem setKey [hashKey]
+        wrappedMembers    <- smembers setKey
+        -- delete hash
+        del [hashKey]
+        flushdb
+        let membersList = fromRight [""] wrappedMembers
+            numRemoved  = fromRight 99 wrappedNumRemoved
+        return $ null membersList && numRemoved == 1
+
+-- --------------------------------------------------------------------------------
 -- Main
 
 main :: IO ()
@@ -211,6 +243,8 @@ main = do
   quickCheck $ prop_hmsetThenHmget   conn
   renderHeader "prop_addHashToSet:"
   quickCheck $ prop_addHashToSet     conn
+  renderHeader "prop_delHashFromSet:"
+  quickCheck $ prop_delHashFromSet   conn
   return ()
   where
     renderHeader str = putStr $  str ++ " " ++ replicate (25 - length str) ' '
