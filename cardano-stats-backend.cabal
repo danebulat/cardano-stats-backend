@@ -33,8 +33,7 @@ executable cardano-stats-backend
 library
     hs-source-dirs:   src
     exposed-modules:
-    other-modules:    ApiTypes
-                    , Server
+    other-modules:    Server
     build-depends:    base ^>=4.14.3.0
                     , hedis
                     , aeson

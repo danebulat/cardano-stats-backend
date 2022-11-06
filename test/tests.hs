@@ -148,6 +148,7 @@ prop_hmsetThenHmget conn = monadicIO $ do
   run $ runRedis conn $ do
     hmset key fieldValues
     emBs <- hmget key fields
+    flushdb
     let bs = fromMaybe [] (extract' emBs)
     return $ bs == values
   where
@@ -167,6 +168,30 @@ addSuffixSample = addSuffix 1 sampleData
   where sampleData = [("field", "val"), ("field", "val"), ("field", "val")]
 
 -- --------------------------------------------------------------------------------
+-- Test summary:
+--  > Create a hash
+--  > Add the hash to a new set
+--  > Check if the hash key is a member of the set
+
+prop_addHashToSet :: Connection -> Property
+prop_addHashToSet conn = monadicIO $ do
+  hashKey <- pick genReadableByteString
+  setKey  <- pick genReadableByteString
+  let hashFieldVals = [("field1", "val1"), ("field2", "val2")]
+  
+  run $ runRedis conn $ do
+    -- create hash
+    hmset hashKey hashFieldVals
+    -- create set
+    sadd setKey [hashKey]
+    -- get members from set
+    wrappedBool <- sismember setKey hashKey
+    flushdb
+    -- return True if the hash is a member of the set
+    let result = fromRight False wrappedBool
+    return result
+
+-- --------------------------------------------------------------------------------
 -- Main
 
 main :: IO ()
@@ -184,6 +209,8 @@ main = do
   quickCheck $ prop_rpushThenRpushx  conn
   renderHeader "prop_hmsetThenHmget:"
   quickCheck $ prop_hmsetThenHmget   conn
+  renderHeader "prop_addHashToSet:"
+  quickCheck $ prop_addHashToSet     conn
   return ()
   where
     renderHeader str = putStr $  str ++ " " ++ replicate (25 - length str) ' '
