@@ -1,4 +1,7 @@
 module Main where
 
+import qualified Server
+
 main :: IO ()
-main = putStrLn "Hello, Haskell!"
+main = Server.main
+
