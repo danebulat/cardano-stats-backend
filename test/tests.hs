@@ -17,9 +17,6 @@ import           Test.QuickCheck
 import           Test.QuickCheck.Monadic
 import           Test.QuickCheck.Instances ()
 
-
--- https://stackoverflow.com/questions/2259926/testing-io-actions-with-monadic-quickcheck
-
 -- --------------------------------------------------------------------------------
 -- Generators
 
@@ -32,6 +29,9 @@ genReadableByteString = do
 
 -- --------------------------------------------------------------------------------
 -- Utils
+
+testDatabase :: Integer
+testDatabase = 7
 
 extract :: Either Reply (Maybe a) -> Maybe a
 extract x = case x of
@@ -62,6 +62,7 @@ prop_setThenGet conn = monadicIO $ do
 runSetThenGet :: Connection -> [BS.ByteString] -> IO Bool
 runSetThenGet conn xs = do
   runRedis conn $ do
+    select testDatabase
     set "hello" (head xs)
     set "world" (last xs)
     hello <- get "hello"
@@ -77,6 +78,7 @@ prop_counterIncrBy conn = monadicIO $ do
   x <- pick $ elements [1..100 :: Integer]
   y <- pick $ elements [1..100 :: Integer]
   run $ runRedis conn $ do
+    select testDatabase
     let k = "key"
     set k (BSU.fromString . show $ x) >> incrby k y
     bs <- get k
@@ -90,6 +92,7 @@ prop_msetThenMget :: Connection -> Property
 prop_msetThenMget conn = monadicIO $ do
   integers <- pick $ concat <$> listOf1 (vector 2 :: Gen [Integer])
   run $ runRedis conn $ do
+    select testDatabase
     -- convert integers to key and value bytestrings for redis
     let xs = map (\x -> (toBs x, toBs x)) integers
     mset xs
@@ -107,6 +110,7 @@ prop_existsThenDelete :: Connection -> Property
 prop_existsThenDelete conn = monadicIO $ do
   bs <- pick genReadableByteString
   run $ runRedis conn $ do
+    select testDatabase
     let key = "mykey"
     set key bs
     exists1 <- exists key
@@ -122,6 +126,7 @@ prop_rpushThenRpushx conn = monadicIO $ do
   x  <- pick $ elements [1..100 :: Integer]
   xs <- pick $ listOf1 (vector 2 :: Gen [Integer])
   run $ runRedis conn $ do
+    select testDatabase
     let key = "mylist"
     rpush key [toBs x]
     mapM_ (rpushx key . toBs) (concat xs)
@@ -146,6 +151,7 @@ prop_hmsetThenHmget conn = monadicIO $ do
   
   -- start redis environment
   run $ runRedis conn $ do
+    select testDatabase
     hmset key fieldValues
     emBs <- hmget key fields
     flushdb
@@ -180,6 +186,7 @@ prop_addHashToSet conn = monadicIO $ do
   let hashFieldVals = [("field1", "val1"), ("field2", "val2")]
   
   run $ runRedis conn $ do
+    select testDatabase
     -- create hash
     hmset hashKey hashFieldVals
     -- create set
@@ -205,6 +212,7 @@ prop_delHashFromSet conn = monadicIO $ do
   let hashFieldVals = [("field1", "val1"), ("field2", "val2")]
   
   run $ runRedis conn $ do
+    select testDatabase
     -- add hash and set 
     hmset hashKey hashFieldVals
     sadd setKey [hashKey]

@@ -12,12 +12,13 @@ module Server where
 
 import           Control.Monad.Except
 import           Data.Aeson
-import qualified Data.ByteString           as BS
-import qualified Data.ByteString.UTF8      as BSU
-import           Data.Either               (fromRight)
-import           Data.Maybe                (fromJust)
+import qualified Data.ByteString             as BS
+import qualified Data.ByteString.UTF8        as BSU
+import           Data.Either                 (fromRight)
+import           Data.Maybe                  (fromJust)
 import           GHC.Generics
 import           Network.Wai.Handler.Warp
+import           Network.Wai.Middleware.Cors
 import           Servant
 import           Database.Redis
 
@@ -174,10 +175,16 @@ apiType :: Proxy ReqApi
 apiType = Proxy
 
 app :: Application
-app = serve apiType server
+app =  cors (const
+             $ Just (simpleCorsResourcePolicy {
+                        corsMethods        = ["GET", "POST", "DELETE"],
+                        corsRequestHeaders = ["Content-Type"] }))
+       $ serve apiType server
 
 main :: IO ()
-main = run 8081 app
+main = do
+  putStrLn "> Listening on port 8081"
+  run 8081 app
 
 -- --------------------------------------------------------------------------------
 -- Utils

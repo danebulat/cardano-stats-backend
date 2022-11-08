@@ -14,3 +14,9 @@ curl -X POST http://localhost:8081/requests \
   -H "Content-Type: application/json" \
   -d '{ "getReqUrl": "http://some.url" }'
 ```
+
+Performing a `GET` request:
+
+```
+curl http://localhost:8081/requests
+```
